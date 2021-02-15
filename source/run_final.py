@@ -1,4 +1,4 @@
-# meeting 22/07
+# All experiements
 
 import os
 import random
@@ -68,49 +68,38 @@ conf_lb_measures = [
     'measure_wiktionary'
     ]
 
-def read_rdf(ont1, ont2):
-
-    largebio_data_processed_path = 'data/df_largebio_{}_{}.csv'.format(ont1, ont2)
-    largebio_ref_processed_path = 'data/df_largebio_{}_{}_ref.csv'.format(ont1, ont2)
-
-    if not os.path.isfile(largebio_data_processed_path):
-        # Specify path for the alignments and reference alignments
-        res_dir = os.path.join("data","largebio-results-2019")
-        ref_path = os.path.join(
-                "data",
-                "oaei2019_umls_flagged_reference",
-                "oaei_{}_{}_mappings_with_flagged_repairs.rdf".format(ont1,ont2)
-                )
-        # Load rdf data
-        df_data, df_ref = u.load_rdf('largebio', res_dir,ref_path,ont1,ont2)
-
-        # Negative sampling
-        df_data = u.negative_sampling_target(lb_measures, df_data,df_ref)
-
-        # Save results to csv
-        largebio_data_processed_path = 'data/df_largebio_{}_{}.csv'.format(ont1, ont2)
-        largebio_ref_processed_path = 'data/df_largebio_{}_{}_ref.csv'.format(ont1, ont2)
-
-        # Save results to csv
-        df_data.to_csv(largebio_data_processed_path, index = False)
-        df_ref.to_csv(largebio_ref_processed_path, index = False)
-
-    else:
-        print('File already exists')
-        df_data = pd.read_csv(largebio_data_processed_path)
-        df_ref = pd.read_csv(largebio_ref_processed_path)
-
-    return df_data, df_ref
-
-
 ## LOAD LB
+lb_data_path = os.path.join("data", "largebio-results-2019")
+lb_ref_path =os.path.join("data", "oaei2019_umls_flagged_reference")
 
-df_lb1, df_lb1_ref = read_rdf('fma', 'nci')
-df_lb2, df_lb2_ref = read_rdf('fma', 'snomed')
-df_lb3, df_lb3_ref = read_rdf('snomed', 'nci')
+df_lb1, df_lb1_ref = u.read_rdf(ont1='fma', 
+                                ont2='nci', 
+                                measures=lb_measures, 
+                                track='largebio', 
+                                data_path=lb_data_path, 
+                                ref_path= os.path.join(lb_ref_path, "oaei_fma_nci_mappings_with_flagged_repairs.rdf"),
+                                data_processed_path= os.path.join(lb_data_path,"data_lb1.csv"), 
+                                ref_processed_path= os.path.join(lb_data_path,"ref_lb1.csv.csv"))
+
+df_lb2, df_lb2_ref = u.read_rdf(ont1='fma', 
+                                ont2='snomed', 
+                                measures=lb_measures, 
+                                track='largebio', 
+                                data_path=lb_data_path, 
+                                ref_path=os.path.join(lb_ref_path, "oaei_fma_snomed_mappings_with_flagged_repairs.rdf"),
+                                data_processed_path= os.path.join(lb_data_path,"data_lb2.csv"), 
+                                ref_processed_path= os.path.join(lb_data_path,"ref_lb2.csv"))
+
+df_lb3, df_lb3_ref = u.read_rdf(ont1='snomed', 
+                                ont2='nci', 
+                                measures=lb_measures, 
+                                track='largebio', 
+                                data_path=lb_data_path, 
+                                ref_path=os.path.join(lb_ref_path, "oaei_snomed_nci_UMLS_mappings_with_flagged_repairs.rdf"),
+                                data_processed_path= os.path.join(lb_data_path,"data_lb3.csv"), 
+                                ref_processed_path= os.path.join(lb_data_path,"ref_lb3.csv"))
 
 ## LOAD ANATOMY
-
 df_an_path = os.path.join("data", "df_an.csv")
 df_an_ref_path = os.path.join("data", "df_an_ref.csv")
 
@@ -138,7 +127,7 @@ if not os.path.isfile(df_an_path) or not os.path.isfile(df_an_ref_path):
     an_wiktionary = u.extract_mappings(os.path.join(an_res_dir, "Wiktionary.rdf"))
 
     an_tool_mappings = {
-        "agm": an_aml,
+        "agm": an_agm,
         "aml": an_aml,
         "dome": an_dome,
         "fcamap": an_fcamap,
@@ -162,6 +151,16 @@ else:
     df_an = pd.read_csv(df_an_path)
     df_an_ref = pd.read_csv(df_an_ref_path)
 
+# Merge datasets
+df_an = df_an.merge(df_an_ref, how='outer',on=["entity1", "entity2"])
+df_an.rename(columns={"measure": "label"}, inplace=True)
+df_lb1 = df_lb1.merge(df_lb1_ref, how='outer',on=["entity1", "entity2"])
+df_lb1.rename(columns={"measure": "label"}, inplace=True)
+df_lb2 = df_lb2.merge(df_lb2_ref, how='outer',on=["entity1", "entity2"])
+df_lb2.rename(columns={"measure": "label"}, inplace=True)
+df_lb3 = df_lb3.merge(df_lb3_ref, how='outer',on=["entity1", "entity2"])
+df_lb3.rename(columns={"measure": "label"}, inplace=True)
+
 # Missing values
 df_lb1.fillna(0)
 df_lb2.fillna(0)
@@ -169,22 +168,21 @@ df_lb3.fillna(0)
 df_an.fillna(0)
 
 #binary data
-X_bins_lb1 = u.bin_features(df_lb1.copy(), 0,1, lb_measures)
-X_bins_lb2 = u.bin_features(df_lb2.copy(), 0,1, lb_measures)
-X_bins_lb3 = u.bin_features(df_lb3.copy(), 0,1, lb_measures)
-X_bins_an = u.bin_features(df_an.copy(), 0,1, lb_measures)
+Xy_bins_lb1 = u.bin_features(df_lb1.copy(), 0,1)
+Xy_bins_lb2 = u.bin_features(df_lb2.copy(), 0,1)
+Xy_bins_lb3 = u.bin_features(df_lb3.copy(), 0,1)
+Xy_bins_an = u.bin_features(df_an.copy(), 0,1)
 
 #prepare dfs
-Xy_bins_lb1 = X_bins_lb1.copy()
-Xy_bins_lb2 = X_bins_lb2.copy()
-Xy_bins_lb3 = X_bins_lb3.copy()
-Xy_bins_an = X_bins_an.copy()
+X_bins_lb1 = Xy_bins_lb1.copy()
+X_bins_lb2 = Xy_bins_lb2.copy()
+X_bins_lb3 = Xy_bins_lb3.copy()
+X_bins_an = Xy_bins_an.copy()
 
-Xy_bins_lb1['label'] = df_lb1['label']
-Xy_bins_lb2['label'] = df_lb2['label']
-Xy_bins_lb3['label'] = df_lb3['label']
-Xy_bins_an['label'] = df_an['label']
-
+X_bins_an.drop('label', axis=1)
+X_bins_lb1.drop('label', axis=1)
+X_bins_lb2.drop('label', axis=1)
+X_bins_lb3.drop('label', axis=1)
 
 #READ CONFERENCE
 
@@ -200,29 +198,24 @@ if not os.path.isfile(conference_data_processed_path):
             "{}-{}.rdf".format(ont1,ont2),
         )
         df_data, df_ref = u.load_rdf('conference', res_dir,ref_path,ont1,ont2)
-        df_data = u.negative_sampling_target(cf_measures, df_data,df_ref)
         df_data["ontologies"] = f"{ont1}-{ont2}"
         dfs_data.append(df_data)
         dfs_refs.append(df_ref)
 
     df_conf = pd.concat(dfs_data, ignore_index = True)
+    df_ref = pd.concat(dfs_refs, ignore_index = True)
+    df_conf = df_conf.merge(df_ref, how='outer',on=["entity1", "entity2"])
+    df_conf.rename(columns={"measure": "label"}, inplace=True)
     df_conf.to_csv(conference_data_processed_path, index = False)
 else:
     df_conf = pd.read_csv(conference_data_processed_path)
 
-X_cf, y_cf = df_conf[cf_measures], df_conf['label']
-
 #fill missing values with 0
-X_cf = X_cf.fillna(0)
-#binary features
-X_cf_bins = u.bin_features(X_cf.copy(), 0,1, cf_measures)
-
-Xy_cf_bins = X_cf_bins.copy()
-Xy_cf_bins['label'] = y_cf
-
 df_conf = df_conf.fillna(0)
-df_conf = u.bin_features(df_conf, 0,1, cf_measures)
 
+#binary features
+Xy_cf_bins = u.bin_features(df_conf.copy().drop('ontologies', axis=1),0,1)
+X_cf, y_cf = Xy_cf_bins[cf_measures], Xy_cf_bins['label']
 
 #DEFINE CLASSIFIERS & ARGS
 classifiers = [
@@ -273,18 +266,21 @@ columns_inter.append('label')
 cross_tuples=[
     ([Xy_bins_an], [Xy_bins_lb1, Xy_bins_lb2, Xy_bins_lb3], "anatomy-lb"),
     ([Xy_bins_lb1, Xy_bins_lb2, Xy_bins_lb3], [Xy_bins_an], "lb-anatomy"),
-    ([Xy_bins_lb1], [Xy_bins_lb2,Xy_bins_lb3], "lb1-lb23"),
-    ([Xy_bins_lb2], [Xy_bins_lb1,Xy_bins_lb3], "lb2-lb13"),
-    ([Xy_bins_lb3], [Xy_bins_lb1,Xy_bins_lb2], "lb3-lb12"),
-    ([Xy_cf_bins], [Xy_cf_bins.iloc[:100]], "cf"),
-    ([Xy_cf_bins[columns_inter]], [Xy_bins_lb1[columns_inter], Xy_bins_lb2[columns_inter], Xy_bins_lb3[columns_inter]], "cf-lb"),
-    ([Xy_bins_lb1[columns_inter], Xy_bins_lb2[columns_inter], Xy_bins_lb3[columns_inter]], [Xy_cf_bins[columns_inter]], "lb-cf")
 ]
 
 #conference train in x test in y (x3)
 ont_comb_train = 18
-for _ in range(3): cross_tuples.append(get_conference_data(cf_measures, ont_comb_train, df_conf))
+for _ in range(3): 
+    cross_tuples.append(get_conference_data(cf_measures, ont_comb_train, df_conf))
 
-u.train_and_eval2(cross_tuples, classifiers, classifier_kwargs, undersample=True, save='data/results_paper.pkl')
+ #
+ #   ([Xy_bins_lb1], [Xy_bins_lb2,Xy_bins_lb3], "lb1-lb23"),
+ #   ([Xy_bins_lb2], [Xy_bins_lb1,Xy_bins_lb3], "lb2-lb13"),
+ #   ([Xy_bins_lb3], [Xy_bins_lb1,Xy_bins_lb2], "lb3-lb12"),
+ #   ([Xy_cf_bins], [Xy_cf_bins.iloc[:100]], "cf"),
+ #   ([Xy_cf_bins[columns_inter]], [Xy_bins_lb1[columns_inter], Xy_bins_lb2[columns_inter], Xy_bins_lb3[columns_inter]], "cf-lb"),
+ #   ([Xy_bins_lb1[columns_inter], Xy_bins_lb2[columns_inter], Xy_bins_lb3[columns_inter]], [Xy_cf_bins[columns_inter]], "lb-cf")
+
+u.train_and_eval(cross_tuples, classifiers, classifier_kwargs, undersample=True, save='data/anatomy-lb.pkl')
 
 

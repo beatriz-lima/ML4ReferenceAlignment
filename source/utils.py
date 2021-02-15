@@ -9,8 +9,9 @@ from scipy.stats import norm
 import seaborn as sns
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-
+from imblearn.pipeline import Pipeline, make_pipeline
 from imblearn.over_sampling import SMOTE
+from imblearn.combine import SMOTETomek
 from imblearn.under_sampling import TomekLinks
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
@@ -23,6 +24,141 @@ from sklearn.model_selection import (
 )
 from sklearn.metrics import accuracy_score, f1_score, recall_score, precision_score
 import os
+
+# This function helps to read the rdf ontology alignment files for each tool and also the reference
+# @param ont1, ont2: ontologies that participate in the alignment
+# @param measures: list of tools available in the track
+# @param track: the OAEI track in use. Current 
+# @param data_path: path to the ontology alignment files
+# @param ref_path: path to the reference alignment
+# @param data_processed_path: path to which save the processed data files
+# @param data_processed_path: path to which save the processed reference file
+def read_rdf(ont1, ont2, measures, track, data_path, ref_path, data_processed_path, ref_processed_path):
+
+    if not os.path.isfile(data_processed_path):
+        # Load rdf data
+        df_data, df_ref = load_rdf(track, data_path, ref_path, ont1, ont2)
+
+        # Save results to csv
+        df_data.to_csv(data_processed_path, index = False)
+        df_ref.to_csv(ref_processed_path, index = False)
+
+    else:
+        print('File already exists')
+        df_data = pd.read_csv(data_processed_path)
+        df_ref = pd.read_csv(ref_processed_path)
+
+    return df_data, df_ref
+
+
+def load_rdf(track, data_path, ref_path, ont1, ont2):
+    df_ref = extract_mappings(ref_path, is_ref=True)
+
+    if track == "conference":
+        alin = extract_mappings(
+            os.path.join(data_path, "ALIN-{}-{}.rdf".format(ont1, ont2))
+        )
+        aml = extract_mappings(
+            os.path.join(data_path, "AML-{}-{}.rdf".format(ont1, ont2))
+        )
+        dome = extract_mappings(
+            os.path.join(data_path, "DOME-{}-{}.rdf".format(ont1, ont2))
+        )
+        lily = extract_mappings(
+            os.path.join(data_path, "Lily-{}-{}.rdf".format(ont1, ont2))
+        )
+        logmap = extract_mappings(
+            os.path.join(data_path, "LogMap-{}-{}.rdf".format(ont1, ont2))
+        )
+        logmaplt = extract_mappings(
+            os.path.join(data_path, "LogMapLt-{}-{}.rdf".format(ont1, ont2))
+        )
+        ontmat1 = extract_mappings(
+            os.path.join(data_path, "ONTMAT1-{}-{}.rdf".format(ont1, ont2))
+        )
+        sanom = extract_mappings(
+            os.path.join(data_path, "SANOM-{}-{}.rdf".format(ont1, ont2))
+        )
+        wiktionary = extract_mappings(
+            os.path.join(data_path, "Wiktionary-{}-{}.rdf".format(ont1, ont2))
+        )
+        tool_mappings = {
+            "alin": alin,
+            "aml": aml,
+            "dome": dome,
+            "lily": lily,
+            "logmap": logmap,
+            "logmaplt": logmaplt,
+            "ontmat1": ontmat1,
+            "sanom": sanom,
+            "wiktionary": wiktionary,
+        }
+
+    elif track == "largebio":
+        agm = extract_mappings(
+            os.path.join(
+                data_path, "AGM-largebio-{}_{}_whole_2019.rdf".format(ont1, ont2)
+            )
+        )
+        aml = extract_mappings(
+            os.path.join(
+                data_path, "AML-largebio-{}_{}_whole_2019.rdf".format(ont1, ont2)
+            )
+        )
+        dome = extract_mappings(
+            os.path.join(
+                data_path, "DOME-largebio-{}_{}_whole_2019.rdf".format(ont1, ont2)
+            )
+        )
+        fcamap = extract_mappings(
+            os.path.join(
+                data_path, "FCAMap-KG-largebio-{}_{}_whole_2019.rdf".format(ont1, ont2)
+            )
+        )
+        logmap = extract_mappings(
+            os.path.join(
+                data_path, "LogMap-largebio-{}_{}_whole_2019.rdf".format(ont1, ont2)
+            )
+        )
+        logmapbio = extract_mappings(
+            os.path.join(
+                data_path, "LogMapBio-largebio-{}_{}_whole_2019.rdf".format(ont1, ont2)
+            )
+        )
+        logmaplt = extract_mappings(
+            os.path.join(
+                data_path, "LogMapLt-largebio-{}_{}_whole_2019.rdf".format(ont1, ont2)
+            )
+        )
+        pomap = extract_mappings(
+            os.path.join(
+                data_path, "POMAP++-largebio-{}_{}_small_2019.rdf".format(ont1, ont2)
+            )
+        )
+        wiktionary = extract_mappings(
+            os.path.join(
+                data_path, "Wiktionary-largebio-{}_{}_whole_2019.rdf".format(ont1, ont2)
+            )
+        )
+        tool_mappings = {
+            "agm": agm,
+            "aml": aml,
+            "dome": dome,
+            "fcamap": fcamap,
+            "logmap": logmap,
+            "logmapbio": logmapbio,
+            "logmaplt": logmaplt,
+            "pomap++": pomap,
+            "wiktionary": wiktionary,
+        }
+   
+    else: 
+        print("That track is not specified. Extend the load_rdf() function in utils.py with the paths to the files of the track you are working with.")
+        return
+
+    # merge everything in one dataframe
+    df_data = merge_mappings(tool_mappings)
+    return df_data, df_ref
 
 def extract_mappings(rdf_path, is_ref=False):
     tree = ET.parse(rdf_path)
@@ -47,15 +183,13 @@ def extract_mappings(rdf_path, is_ref=False):
         ent1 = cell.find("{}entity1".format(current_namespace)).get(f"{ns}resource")
         ent2 = cell.find("{}entity2".format(current_namespace)).get(f"{ns}resource")
         measure = float(cell.find("{}measure".format(current_namespace)).text)
-        relation = cell.find("{}relation".format(current_namespace)).text
 
         mappings.append(
             pd.DataFrame(
                 data={
                     "entity1": [ent1],
                     "entity2": [ent2],
-                    "measure": [measure],
-                    "relation": [relation],
+                    "measure": [measure]
                 }
             )
         )
@@ -69,13 +203,13 @@ def merge_mappings(mappings):
     merged = mappings[keys[0]].merge(
         mappings[keys[1]],
         how="outer",
-        on=["entity1", "entity2", "relation"],
+        on=["entity1", "entity2"],
         suffixes=(f"_{keys[0]}", f"_{keys[1]}"),
     )
 
     for tool in keys[2:]:
         merged = merged.merge(
-            mappings[tool], how="outer", on=["entity1", "entity2", "relation"],
+            mappings[tool], how="outer", on=["entity1", "entity2"],
         )
         merged[f"measure_{tool}"] = merged["measure"]
         merged = merged.drop(columns="measure")
@@ -124,70 +258,6 @@ def numpify_merge_dataframes(training_dfs, testing_dfs, strategy):
         return X, y, measures
 
 
-def negative_sampling(measures, df, df_reference):
-    """This function produces negative examples given the reference and
-    mappings dataset.
-    Inputs: df => mappings dataset
-            df_reference => reference dataset
-    Outputs: negative and positive examples
-    """
-    print(df.shape)
-
-    ############# TRUE POSITIVES #################
-    df_pos = df_reference[["entity1", "entity2", "relation"]].merge(
-        df[["entity1", "entity2", "relation"]],
-        on=["entity1", "entity2", "relation"],
-        how="inner",
-    )
-
-    ######### negatives 1+2 (FALSE POSITIVES AND TRUE NEGATIVES TO SOME TOOLS) ############
-    df_neg = df_reference[["entity1", "entity2", "relation"]].merge(
-        df[["entity1", "entity2", "relation"]],
-        on=["entity1", "entity2", "relation"],
-        how="outer",
-        indicator=True,
-    )
-    df_neg = df_neg[(df_neg["_merge"] == "right_only") & (df_neg["relation"] != "?")]
-    df_neg = df_neg.drop(columns="_merge")
-
-    print("size negatives 1: {}".format(len(df_neg)))
-
-    ####### negatives 2 (TRUE NEGATIVES) ##############
-    negs_ids = []
-    for measure in measures:
-        if measure in df.columns:
-            nan_examples = df[df[measure].isna()]
-            true_negs = 0
-
-            for i, row in nan_examples.iterrows():
-                if df_reference[
-                    (df_reference["entity1"] == row["entity1"])
-                    & (df_reference["entity2"] == row["entity2"])
-                ].empty:
-                    negs_ids.append(i)
-
-            # print(f"Minimum for {measure} is {df_an[measure].min()}")
-            # print(f"NA: {df_an[measure].isna().sum()}/{len(df)}")
-            # print(f"True Negatives: {len(negs_ids)}")
-
-    negs_ids = np.unique(np.array(negs_ids))
-    print("size negatives 2: {}".format(len(negs_ids)))
-
-    # select just the negative ids identified above
-    df_neg2 = df.iloc[negs_ids][["entity1", "entity2", "relation"]]
-    # merge two dataframes of negatives and drop duplicates
-    df_neg = pd.concat([df_neg, df_neg2]).drop_duplicates(
-        ["entity1", "entity2", "relation"]
-    )
-
-    print("size negatives after concatenate both: {}".format(len(df_neg)))
-
-    print("# negative examples: {}".format(len(df_neg)))
-    print("# positive examples: {}".format(len(df_pos)))
-
-    return df_neg, df_pos
-
-
 def feature_bin(x, minimum, maximum):
     if x > 0:
         return maximum
@@ -196,17 +266,10 @@ def feature_bin(x, minimum, maximum):
         return minimum
 
 
-def bin_features(df, minimum, maximum, measures):
-    for m in measures:
+def bin_features(df, minimum, maximum):
+    for m in df.columns[2:]:
         df[m] = [feature_bin(x, minimum, maximum) for x in df[m]]
     return df
-
-
-def negative_sampling_target(measures, df_mappings, df_mappings_ref):
-    # compute positives and negatives
-    df_neg, df_pos = negative_sampling(measures, df_mappings, df_mappings_ref)
-    df_mappings["label"] = labels(df_mappings, df_neg, df_pos)
-    return df_mappings
 
 
 def feature_dist(df, column_name):
@@ -223,7 +286,6 @@ def feature_dist(df, column_name):
     plt.ylabel("Frequency")
     plt.title("{} distribution".format(column_name))
     plt.show()
-
 
 def train_and_eval(
     cross_tuples,
@@ -267,158 +329,36 @@ def train_and_eval(
         for sampl_stg in tqdm(
             sampling_strategies, desc="Sampling Strategy", leave=False
         ):
-            if sampl_stg == "oversample":
-                sm = SMOTE(random_state=42, n_jobs=-1)
-                X_sampled, y_sampled = sm.fit_resample(X, y)
-            else:
-                tl = TomekLinks(n_jobs=-1)
-                X_sampled, y_sampled = tl.fit_resample(X, y)
+         
             for (classifier, kwargs) in tqdm(
                 classifiers, desc="Classifiers", leave=False
             ):
-                if "param_grid" in kwargs:
-                    try:
-                        clf = classifier(random_state=42)
-                    except:
-                        clf = classifier()
-                    grid_search = GridSearchCV(
-                        clf,
-                        kwargs["param_grid"],
-                        n_jobs=-1,
-                        cv=10,
-                        refit="f1",
-                        scoring=["f1", "precision", "recall", "accuracy"],
-                        return_train_score=True,
-                    )
-                    grid_search.fit(X_sampled, y_sampled)
-                    clf = grid_search.best_estimator_
-                    best_score = grid_search.best_score_
+                if sampl_stg == "oversample":
+                    pipe = Pipeline([
+                        ('sampling', SMOTETomek(random_state= 42, n_jobs= -1)),
+                        ('classifier', classifier())
+                    ]) 
                 else:
-                    try:
-                        clf = classifier(**kwargs, random_state=42)
-                    except:
-                        clf = classifier(**kwargs)
-                    clf.fit(X_sampled, y_sampled)
-
-                for testing_df in testing_dfs:
-                    X_test, y_test, _ = numpify_merge_dataframes(
-                        [testing_df[measures + ["label"]]], [], "intersection"
-                    )
-                    y_pred = clf.predict(X_test)
-                    f1 = f1_score(y_test, y_pred)
-                    acc = accuracy_score(y_test, y_pred)
-                    recall = recall_score(y_test, y_pred)
-                    precision = precision_score(y_test, y_pred)
-
-                    report_data = {
-                        "name": [name],
-                        "classifier": [clf],
-                        "training_df": [training_dfs],
-                        "testing_df": [testing_df],
-                        "sampling_strategy": [sampl_stg],
-                        "f1_train": [best_score],
-                        "f1_test": [f1],
-                        "acc_test": [acc],
-                        "recall_test": [recall],
-                        "precision_test": [precision],
-                    }
-
-                    if "param_grid" in kwargs:
-                        report_data["grid_search"] = [grid_search]
-
-                    reports.append(pd.DataFrame(data=report_data))
-
-                n_models += 1
-
-                if save is not None and n_models % save_rate == 0:
-                    df = pd.concat(reports, ignore_index=True)
-                    df = df.sort_values('f1_test', ascending = False)
-                    with open(save, "wb") as fw:
-                        pickle.dump(df, fw, pickle.HIGHEST_PROTOCOL)
-
-    df = pd.concat(reports, ignore_index=True)
-    df = df.sort_values('f1_test', ascending = False)
-    if save is not None:
-        with open(save, "wb") as fw:
-            pickle.dump(df, fw, pickle.HIGHEST_PROTOCOL)
-
-    return df
-
-def train_and_eval2(
-    cross_tuples,
-    classifiers,
-    classifier_kwargs,
-    missing_feature_strategy="intersection",
-    undersample=False,
-    save=None,
-    save_rate=20
-):
-    """
-    cross_tuples: A list of tuples with the following shape:
-        (*[Training DataFrames], *[Testing DataFrames], name : string)
-    classifiers: list of classifier classes
-    classifier_kwargs: list of dictionaries that will be used as keyword arguments for the classifier.
-                    If the kwargs includes a key 'param_grid' with a dictionary of value ranges,
-                    the optimum hyperparameters will be searched for using a GridSearch.
-    missing_feature_strategy: Either intersection or substitution. Intersection will remove
-                    features not in common. Substitution will substitute the prediction
-                    of the missing tool with a 0.
-    undersample: Boolean. Indicates whether to try undersampling.
-    save: String. Path to which to save the pickled dataframe.
-        This function may be useful as the dataframe includes the objects of the classifiers, which may
-        become useful to store to analyze later (beta coefficients, weights, etc.)
-    save_rate: The rate of save, in number of models trained. Every N models, the results are saved.
-    """
-
-    reports = []
-
-    classifiers = list(zip(classifiers, classifier_kwargs))
-    sampling_strategies = ["oversample"]
-
-    n_models = 0
-
-    if undersample:
-        sampling_strategies.extend(["undersample"])
-    for (training_dfs, testing_dfs, name) in tqdm(cross_tuples, desc="Cross Tuples"):
-        X, y, measures = numpify_merge_dataframes(
-            training_dfs, testing_dfs, missing_feature_strategy
-        )
-        for sampl_stg in tqdm(
-            sampling_strategies, desc="Sampling Strategy", leave=False
-        ):
-            if sampl_stg == "oversample":
-                sm = SMOTE(random_state=42, n_jobs=-1)
-                X_sampled, y_sampled = sm.fit_resample(X, y)
-            else:
-                tl = TomekLinks(n_jobs=-1)
-                X_sampled, y_sampled = tl.fit_resample(X, y)
-            for (classifier, kwargs) in tqdm(
-                classifiers, desc="Classifiers", leave=False
-            ):
-                if "param_grid" in kwargs:
-                    try:
-                        clf = classifier(random_state=42)
-                    except:
-                        clf = classifier()
-                    grid_search = GridSearchCV(
-                        clf,
-                        kwargs["param_grid"],
-                        n_jobs=-1,
-                        cv=10,
-                        refit="f1",
-                        scoring=["f1", "precision", "recall", "accuracy"],
-                        return_train_score=True,
-                    )
-                    grid_search.fit(X_sampled, y_sampled)
-                    clf = grid_search.best_estimator_
-                    best_score = grid_search.best_score_
-                else:
-                    try:
-                        clf = classifier(**kwargs, random_state=42)
-                    except:
-                        clf = classifier(**kwargs)
-                    clf.fit(X_sampled, y_sampled)
-                
+                    pipe = Pipeline([
+                        ('sampling', TomekLinks(n_jobs= -1)),
+                        ('classifier', classifier())
+                    ]) 
+                    
+                new_params = {'classifier__' + key: kwargs["param_grid"][key] for key in kwargs["param_grid"]}
+            
+                grid_search = GridSearchCV(
+                    pipe,
+                    new_params,
+                    n_jobs=-1,
+                    cv=10,
+                    refit="f1",
+                    scoring=["f1", "precision", "recall", "accuracy"],
+                    return_train_score=True,
+                )
+                grid_search.fit(X, y)
+                clf = grid_search.best_estimator_
+                best_score = grid_search.best_score_
+            
                 df_test = pd.concat(testing_dfs)
                 
                 X_test, y_test, _ = numpify_merge_dataframes(
@@ -445,8 +385,7 @@ def train_and_eval2(
                     "precision_test": [precision],
                 }
 
-                if "param_grid" in kwargs:
-                    report_data["grid_search"] = [grid_search]
+                report_data["grid_search"] = [grid_search]
 
                 reports.append(pd.DataFrame(data=report_data))
 
@@ -460,117 +399,17 @@ def train_and_eval2(
 
     df = pd.concat(reports, ignore_index=True)
     df = df.sort_values('f1_train', ascending = False)
+    
+    #remove traing_df column that is not readable
+    #sort values by test accuracy
+    readable_results = df.loc[:,df.columns!='training_df'].sort_values(by=['f1_test'],ascending=False)
+    readable_results['classifier_name'] = [c[0:c.index('(')] for c in readable_results.classifier.astype(str)]
+    
     if save is not None:
         with open(save, "wb") as fw:
-            pickle.dump(df, fw, pickle.HIGHEST_PROTOCOL)
+            pickle.dump(readable_results, fw, pickle.HIGHEST_PROTOCOL)
 
-    return df
-
-
-def load_rdf(track, res_dir, ref_path, ont1, ont2):
-    df_ref = extract_mappings(ref_path, is_ref=True)
-
-    if track == "conference":
-        alin = extract_mappings(
-            os.path.join(res_dir, "ALIN-{}-{}.rdf".format(ont1, ont2))
-        )
-        aml = extract_mappings(
-            os.path.join(res_dir, "AML-{}-{}.rdf".format(ont1, ont2))
-        )
-        dome = extract_mappings(
-            os.path.join(res_dir, "DOME-{}-{}.rdf".format(ont1, ont2))
-        )
-        lily = extract_mappings(
-            os.path.join(res_dir, "Lily-{}-{}.rdf".format(ont1, ont2))
-        )
-        logmap = extract_mappings(
-            os.path.join(res_dir, "LogMap-{}-{}.rdf".format(ont1, ont2))
-        )
-        logmaplt = extract_mappings(
-            os.path.join(res_dir, "LogMapLt-{}-{}.rdf".format(ont1, ont2))
-        )
-        ontmat1 = extract_mappings(
-            os.path.join(res_dir, "ONTMAT1-{}-{}.rdf".format(ont1, ont2))
-        )
-        sanom = extract_mappings(
-            os.path.join(res_dir, "SANOM-{}-{}.rdf".format(ont1, ont2))
-        )
-        wiktionary = extract_mappings(
-            os.path.join(res_dir, "Wiktionary-{}-{}.rdf".format(ont1, ont2))
-        )
-        tool_mappings = {
-            "alin": alin,
-            "aml": aml,
-            "dome": dome,
-            "lily": lily,
-            "logmap": logmap,
-            "logmaplt": logmaplt,
-            "ontmat1": ontmat1,
-            "sanom": sanom,
-            "wiktionary": wiktionary,
-        }
-
-    elif track == "largebio":
-        agm = extract_mappings(
-            os.path.join(
-                res_dir, "AGM-largebio-{}_{}_whole_2019.rdf".format(ont1, ont2)
-            )
-        )
-        aml = extract_mappings(
-            os.path.join(
-                res_dir, "AML-largebio-{}_{}_whole_2019.rdf".format(ont1, ont2)
-            )
-        )
-        dome = extract_mappings(
-            os.path.join(
-                res_dir, "DOME-largebio-{}_{}_whole_2019.rdf".format(ont1, ont2)
-            )
-        )
-        fcamap = extract_mappings(
-            os.path.join(
-                res_dir, "FCAMap-KG-largebio-{}_{}_whole_2019.rdf".format(ont1, ont2)
-            )
-        )
-        logmap = extract_mappings(
-            os.path.join(
-                res_dir, "LogMap-largebio-{}_{}_whole_2019.rdf".format(ont1, ont2)
-            )
-        )
-        logmapbio = extract_mappings(
-            os.path.join(
-                res_dir, "LogMapBio-largebio-{}_{}_whole_2019.rdf".format(ont1, ont2)
-            )
-        )
-        logmaplt = extract_mappings(
-            os.path.join(
-                res_dir, "LogMapLt-largebio-{}_{}_whole_2019.rdf".format(ont1, ont2)
-            )
-        )
-        pomap = extract_mappings(
-            os.path.join(
-                res_dir, "POMAP++-largebio-{}_{}_small_2019.rdf".format(ont1, ont2)
-            )
-        )
-        wiktionary = extract_mappings(
-            os.path.join(
-                res_dir, "Wiktionary-largebio-{}_{}_whole_2019.rdf".format(ont1, ont2)
-            )
-        )
-        tool_mappings = {
-            "agm": agm,
-            "aml": aml,
-            "dome": dome,
-            "fcamap": fcamap,
-            "logmap": logmap,
-            "logmapbio": logmapbio,
-            "logmaplt": logmaplt,
-            "pomap++": pomap,
-            "wiktionary": wiktionary,
-        }
-
-    # merge them all in a dataframe
-    df_data = merge_mappings(tool_mappings)
-    return df_data, df_ref
+    return readable_results
 
 def plot_top_results(df_data,title, sort_by = ['f1_train'], top= 5, logs = True):
     df_data = df_data.sort_values(by=sort_by,ascending=False).iloc[:top]
